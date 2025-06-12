@@ -1,4 +1,7 @@
 from flask import Flask, request, jsonify
+import google.generativeai as genai
+from agents.science_agent import ScienceAgent
+from agents.curious_agent import CuriousAgent
 
 app = Flask(__name__)
 
@@ -13,5 +16,19 @@ def chat():
     reply = f"You said: {user_message}"
     return jsonify({'reply': reply})
 
+def main(): 
+    #Set your Gemini API key
+    genai.configure(api_key="AIzaSyAEDUokFA2dYLnu4Cogwz9tOrMaxOTWMys")
+
+    #Initialize the Gemini Model
+    model = genai.GenerativeModel("gemini-pro")
+
+    #Initialize Agents
+    #Insert datapath in order for it to work
+    science_agent = ScienceAgent(model, data_path=None) 
+    support_agent = CuriousAgent(model, data_path=None)
+
+
 if __name__ == '__main__':
+    main()
     app.run(debug=True)
