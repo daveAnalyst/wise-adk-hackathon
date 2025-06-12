@@ -18,7 +18,8 @@ def chat():
 
 def main(): 
     #Set your Gemini API key
-    genai.configure(api_key="AIzaSyAEDUokFA2dYLnu4Cogwz9tOrMaxOTWMys")
+    #Insert your api key here.
+    genai.configure(api_key="")
 
     #Initialize the Gemini Model
     model = genai.GenerativeModel("gemini-pro")
