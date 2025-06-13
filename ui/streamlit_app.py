@@ -1,10 +1,10 @@
 # ui/app.py
 
 import streamlit as st
-import requests  # This is the library we use to "talk" to the API
+import requests
+import time
 
 # --- Page Configuration ---
-# This should be the first Streamlit command in your app
 st.set_page_config(
     page_title="Wise",
     page_icon="🧠",
@@ -12,91 +12,109 @@ st.set_page_config(
 )
 
 # --- State Management ---
-# Streamlit reruns your script from top to bottom every time a user interacts.
-# st.session_state is a special dictionary that persists across these reruns.
-# We use it to store the chat history and the current mood.
 if "messages" not in st.session_state:
-    st.session_state.messages = []
+    # We'll store a bit more info now: the role, content, and avatar
+    st.session_state.messages = [
+        {"role": "assistant", "content": "Hello! I'm Wise. What's on your mind today?", "avatar": "🧠"}
+    ]
 if "current_mood" not in st.session_state:
-    st.session_state.current_mood = "creative" # Set a default mood
+    st.session_state.current_mood = "creative"
 
 # --- Backend API Configuration ---
-# This is the address of Davin's "kitchen".
-# For now, we point to the local address where he will run his Flask app.
-# When we deploy, we will change this to the live Google Cloud Run URL.
-BACKEND_URL = "http://127.0.0.1:5000/chat" # Port 5000 is the default for Flask
+# Let's define both endpoints now
+API_BASE_URL = "http://127.0.0.1:5000"
+CHAT_URL = f"{API_BASE_URL}/chat"
+SPARK_URL = f"{API_BASE_URL}/spark" # The new endpoint for the Curiosity Spark
 
-# --- UI Layout ---
+# --- UI Components ---
 
-st.title("🧠 Wise")
-st.caption("Your mood-adaptive AI friend. Built for the ADK Hackathon.")
-
-# Create a sidebar for mood selection for a cleaner main layout
-st.sidebar.header("Select a Mood")
-
-# A dictionary to map user-friendly labels to the mood values the API expects
-mood_options = {
-    "Creative 🎨": "creative",
-    "Science 🔬": "science",
+# A dictionary to hold info about each mood
+MOOD_CONFIG = {
+    "creative": {"label": "Creative 🎨", "color": "#FFC107"}, # Amber
+    "science": {"label": "Science 🔬", "color": "#2196F3"},   # Blue
 }
 
-# When a button is clicked, this function will be called to update our state
+current_mood_info = MOOD_CONFIG[st.session_state.current_mood]
+
+# --- DYNAMIC HEADER ---
+# Use columns to create a nice header layout
+col1, col2 = st.columns([1, 4])
+with col1:
+    st.image("https://em-content.zobj.net/source/apple/391/brain_1f9e0.png", width=100) # Simple brain emoji image
+with col2:
+    st.title("Wise")
+    # The header color changes with the mood!
+    st.markdown(f"<h3 style='color: {current_mood_info['color']};'>Current Mode: {current_mood_info['label']}</h3>", unsafe_allow_html=True)
+
+
+# --- SIDEBAR ---
+st.sidebar.header("Select a Mood")
 def update_mood(mood_value):
     st.session_state.current_mood = mood_value
+    # Add a message to show the mode has changed
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": f"I'm now in {mood_value.capitalize()} mode. Let's explore!",
+        "avatar": "🧠"
+    })
+    # Rerun the app to reflect the change immediately
+    st.rerun()
 
-# Create a button for each mood in the sidebar
-for label, value in mood_options.items():
-    st.sidebar.button(label, on_click=update_mood, args=(value,), use_container_width=True)
+for value, info in MOOD_CONFIG.items():
+    st.sidebar.button(info["label"], on_click=update_mood, args=(value,), use_container_width=True)
 
-# Display the current mode to the user
-st.sidebar.info(f"Current Mode: **{st.session_state.current_mood.capitalize()}**")
+
+# --- CURIOSITY SPARK BUTTON ---
+st.sidebar.divider()
+if st.sidebar.button("💡 Curiosity Spark", use_container_width=True):
+    with st.chat_message("assistant", avatar="💡"):
+        thinking_placeholder = st.empty()
+        thinking_placeholder.markdown("Searching for a spark...")
+        try:
+            # Call the new /spark endpoint. It doesn't need a message or mood.
+            response = requests.post(SPARK_URL)
+            response.raise_for_status()
+            spark_reply = response.json()["reply"]
+            thinking_placeholder.markdown(spark_reply)
+            st.session_state.messages.append({"role": "assistant", "content": spark_reply, "avatar": "💡"})
+        except requests.exceptions.RequestException as e:
+            error_message = f"Couldn't find a spark right now. Is the backend running? (Error: {e})"
+            thinking_placeholder.error(error_message)
+
 
 # --- Chat History Display ---
-# Loop through the messages stored in our session state and display them
 for message in st.session_state.messages:
-    # Use the 'with' syntax to create a chat message container
-    with st.chat_message(message["role"]):
+    with st.chat_message(message["role"], avatar=message.get("avatar")):
         st.markdown(message["content"])
 
 # --- Main Chat Interaction ---
-# st.chat_input creates the input box at the bottom of the screen.
-# The 'if prompt:' block runs only when the user presses Enter.
 if prompt := st.chat_input("What do you want to explore?"):
-    # 1. Add the user's message to our state and display it immediately
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
+    # Add and display user message
+    st.session_state.messages.append({"role": "user", "content": prompt, "avatar": "🧑‍💻"})
+    with st.chat_message("user", avatar="🧑‍💻"):
         st.markdown(prompt)
 
-    # 2. Prepare for the AI's response
-    with st.chat_message("assistant"):
-        # Create a placeholder to show a "thinking" message while we wait
+    # Prepare and call the API for the AI's response
+    with st.chat_message("assistant", avatar="🧠"):
         thinking_placeholder = st.empty()
         thinking_placeholder.markdown("Wise is thinking...")
-
-        # 3. THE API CALL
         try:
-            # This is the "order" we send to the "waiter" (requests)
-            # It's a Python dictionary that we will convert to JSON.
-            payload = {
-                "message": prompt,
-                "mood": st.session_state.current_mood
-            }
-
-            # This is the line that actually sends the request to Davin's backend
-            response = requests.post(BACKEND_URL, json=payload)
-            response.raise_for_status()  # This will raise an error if the server returns a bad status (like 404 or 500)
-
-            # Get the "plate" back from the "kitchen"
+            payload = {"message": prompt, "mood": st.session_state.current_mood}
+            response = requests.post(CHAT_URL, json=payload)
+            response.raise_for_status()
             ai_reply = response.json()["reply"]
 
-            # Update the placeholder with the real response
-            thinking_placeholder.markdown(ai_reply)
-
-            # Add the AI's full response to our chat history
-            st.session_state.messages.append({"role": "assistant", "content": ai_reply})
+            # This part is for handling potential Plotly graphs from the Science agent
+            if st.session_state.current_mood == 'science' and isinstance(ai_reply, dict) and 'graph' in ai_reply:
+                thinking_placeholder.markdown(ai_reply['text'])
+                st.plotly_chart(ai_reply['graph'], use_container_width=True)
+                # Store both text and graph info
+                st.session_state.messages.append({"role": "assistant", "content": ai_reply, "avatar": "🧠"})
+            else:
+                thinking_placeholder.markdown(ai_reply)
+                st.session_state.messages.append({"role": "assistant", "content": ai_reply, "avatar": "🧠"})
 
         except requests.exceptions.RequestException as e:
-            # This 'except' block catches errors if we can't connect to the backend
-            error_message = f"Could not connect to Wise's brain. Is the backend server running? (Error: {e})"
+            error_message = f"Could not connect to Wise's brain. (Error: {e})"
             thinking_placeholder.error(error_message)
-            st.session_state.messages.append({"role": "assistant", "content": error_message})
+            st.session_state.messages.append({"role": "assistant", "content": error_message, "avatar": "🧠"})
