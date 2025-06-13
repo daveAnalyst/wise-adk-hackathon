@@ -2,7 +2,7 @@ from agents.base_agent import BaseAgent
 from pathlib import Path
 import json
 
-class ScienceAgent(BaseAgent): 
+class CuriousAgent(BaseAgent): 
     def __init__(self, llm, data_path): 
         super().__init__(llm)
         self.data_path = Path(__file__).parent.parent / "data" / data_path
