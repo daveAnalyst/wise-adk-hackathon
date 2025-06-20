@@ -2,19 +2,44 @@
 # --- New main.py (Copy and Paste This Entire Block) ---
 # ==============================================================================
 
+#import streamlit as st
+#import time
+#import plotly.io as pio
+#from dotenv import load_dotenv
+
+# --- NEW: REAL AGENT IMPORTS ---
+#from agents.VibeDetector import detect_vibe
+#from agents.SparkGenerator import get_spark
+#from agents.WiseBot import WiseBot
+
+# In main.py
 import streamlit as st
 import time
 import plotly.io as pio
 from dotenv import load_dotenv
+import os # <-- Add os import
+import google.generativeai as genai # <-- Add genai import
 
 # --- NEW: REAL AGENT IMPORTS ---
 from agents.VibeDetector import detect_vibe
 from agents.SparkGenerator import get_spark
 from agents.WiseBot import WiseBot
 
+# --- CENTRALIZED API KEY CONFIGURATION ---
+load_dotenv()
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
+if not GOOGLE_API_KEY:
+    st.error("FATAL ERROR: GOOGLE_API_KEY not found in .env file!")
+    st.stop() # This will halt the app if the key is missing
+
+genai.configure(api_key=GOOGLE_API_KEY)
+print("✅ Gemini AI Model Initialized Successfully from main.py.")
+# ----------------------------------------
+
 # --- NEW: LOAD API KEYS ---
 # Make sure you have a .env file in this directory with your GOOGLE_API_KEY
-load_dotenv()
+#load_dotenv()
 
 # --- SINGLE, UNIFIED PAGE CONFIGURATION ---
 st.set_page_config(page_title="Wise", page_icon="🦉", layout="wide")
@@ -35,7 +60,7 @@ if "stage" not in st.session_state:
 # --- NEW: REAL AGENT INITIALIZATION ---
 if "wise_bot" not in st.session_state:
     # IMPORTANT: Verify this path is correct from your root directory
-    st.session_state.wise_bot = WiseBot(data_path="data/WMT_1970-10-01_2025-01-31.csv")
+    st.session_state.wise_bot = WiseBot(data_path="data/wmt_stock_data.csv")
 
 # --- CUSTOM CSS ---
 st.markdown("""
@@ -78,7 +103,7 @@ if st.session_state.stage in ["onboarding", "welcome", "set_vibe"]:
             st.header(f"Welcome back, {st.session_state.user_profile['name']}.")
             # --- REPLACED LOGIC: REAL SPARK GENERATION ---
             with st.spinner("Finding a new spark of inspiration..."):
-                spark_idea = get_spark(data_path="data/WMT_1970-10-01_2025-01-31.csv")
+                spark_idea = get_spark(data_path="data/wmt_stock_data.csv")
             st.info(f"💡 **A thought I had:** {spark_idea}")
             btn_col1, btn_col2 = st.columns(2)
             if btn_col1.button("Explore this Idea", use_container_width=True):

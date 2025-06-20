@@ -11,7 +11,7 @@ else:
 
 # --- The Core Logic, Tailored for WMT Stock Data ---
 
-def get_spark(data_path: str = "../data/data/WMT_1970-10-01_2025-01-31.csv") -> str:
+def get_spark(data_path: str = "data/wmt_stock_data.csv") -> str:
     """
     Generates a proactive "spark" by analyzing Walmart stock data.
     Finds the day with the highest trading volume and creates an insight.
