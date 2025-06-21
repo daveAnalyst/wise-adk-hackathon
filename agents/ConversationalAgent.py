@@ -1,300 +1,140 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[7]:
-
-
-from google.adk.agents import Agent
-from google.adk.models.lite_llm import LiteLlm
-from google.adk.sessions import InMemorySessionService
-from google.adk.runners import Runner
-from google.adk.tools.tool_context import ToolContext
-from google.adk.agents.callback_context import CallbackContext
-from google.adk.models.llm_request import LlmRequest
-from google.adk.models.llm_response import LlmResponse
-from google.adk.tools.base_tool import BaseTool
-from google.adk.memory import InMemoryMemoryService
-from google.generativeai import configure
-from google.genai import types
-from google import genai
-import warnings
-from IPython.display import HTML, Markdown, display
-from typing import Optional, Dict, Any
-from types import SimpleNamespace
 import os
-import random
-import json
-import textwrap
-import asyncio
-import re
+import pandas as pd
+import google.generativeai as genai
+from google.generativeai import types
+import plotly.express as px
 
-#Ignore all warnings 
-warnings.filterwarnings("ignore")
+# --- Configuration ---
+if 'GOOGLE_API_KEY' in os.environ:
+    genai.configure(api_key=os.environ['GOOGLE_API_KEY'])
+else:
+    print("WARNING: GOOGLE_API_KEY environment variable not set.")
 
-import logging
-logging.basicConfig(level=logging.ERROR)
-
-# print("All Libraries are imported")
-
-
-# In[28]:
-
-
-os.environ['GOOGLE_API_KEY'] = "AIzaSyAEDUokFA2dYLnu4Cogwz9tOrMaxOTWMys"
-configure(api_key=os.environ['GOOGLE_API_KEY'])
-client = genai.Client(api_key=os.environ['GOOGLE_API_KEY'])
-
-
-# In[30]:
-
-
-async def call_agent_async(query: str, runner, user_id, session_id): 
-    """Sends a query to the agent and prints the final responose. """
-    # print(f"\n >>> User Query: {query}")
-
-    #Prepare the user's messages in ADK format
-    content = types.Content(role='user', parts=[types.Part(text=query)])
-
-    final_response_text = "Agent did not produce a final response." #Default response
-
-    #run_async executes the agent logic and yields Events.
-    #We iterate through events to find the final answer.
-    async for event in runner.run_async(user_id=user_id, session_id=session_id, new_message=content): 
-        # print(f"[Event] Author: {event.author}, Type: {type(event).__name__}, Final: {event.is_final_response()}, Content: {event.content}")
-
-        if event.is_final_response(): 
-            if event.content and event.content.parts: 
-                final_response_text = event.content.parts[0].text
-            elif event.actions and event.actions.escalate: #Handle potential errors
-                final_response_text = f"Agent escalated: {event.error_message or 'No specific message.'}"
-            break
-
-    # print(f"<<< Agent Response: {final_response_text}")
-    return final_response_text
-
-
-
-def science_stateful(query: str, tool_context: ToolContext) -> str: 
+class ConversationalAgent:
     """
-    Responds to user queries in a scientific and analytical manner.
-
-    This agent is activated when the conversation tone is classified as 'scientific'.
-    It provides fact-based, logical, and structured responses, often referencing
-    scientific concepts, definitions, or explanations.
-
-    Parameters:
-        query (str): The user’s input message.
-        tool_context (ToolContext): Context object that includes vibe, messages, last_message.
-
-    Returns:
-        str: A scientifically reasoned response to the user query.
+    The main Conversational Agent for Wise. It thinks with the user,
+    adapting its responses based on the selected 'Cognitive Lens'.
     """
-
-    science_prompt = f"""
-                    You are a scientific assistant. 
-
-                    Your goal is to explain scientific questions in a way that is:
-                    - Analytical and based on facts
-                    - Logically reasoned
-                    - Easy to understand, even for someone with a high school science background
-                    - Structured and clear, using bullet points or paragraphs if appropriate
-
-                    Avoid overly complex jargon unless it's essential, and define technical terms when used.
-    
-                    Question: 
-                        {query}
-                     """
-    response = client.models.generate_content(
-        model="gemini-2.0-flash", 
-        config=types.GenerateContentConfig(
-            temperature=1, 
-            top_p=1, 
-            max_output_tokens=2048
-        ), 
-        contents=science_prompt
-    )
-    result = Markdown(response.text).data
-    return result
-    
-def creative_stateful(query: str, tool_context: ToolContext) -> str: 
-    """
-    Responds to user queries in a creative, imaginative, and expressive manner.
-
-    This agent is activated when the conversation tone is classified as 'creative'.
-    It generates responses that are metaphorical, artistic, poetic, or abstract in nature,
-    aiming to inspire, provoke thought, or entertain.
-
-    Parameters:
-        query (str): The user’s input message.
-        tool_context (ToolContext): Context object that may include session state, tools, and memory.
-
-    Returns:
-        str: A creatively inspired response based on the user's message.
-    """
-    creative_prompt = f"""
-            You are a creative assistant who responds with imagination, beauty, and expression.
-            
-            Your task is to answer the user's message in a way that is:
-            - Artistic, poetic, or metaphorical
-            - Emotionally evocative or thought-provoking
-            - Abstract, whimsical, or story-driven if suitable
-            - Original and free-form, like a piece of creative writing
-            
-            Avoid sounding robotic or overly technical. Feel free to use poetic devices, analogies, or even short stories.
-            
-            Here is the user's prompt:
-            {query}
+    def __init__(self, lens: str = 'scientific', data_path: str = "../data/data/WMT_1970-10-01_2025-01-31.csv"):
         """
+        Initializes the agent with a specific cognitive lens.
 
-    response = client.models.generate_content(
-        model="gemini-2.0-flash", 
-        config=types.GenerateContentConfig(
-            temperature=1, 
-            top_p=1, 
-            max_output_tokens=2048
-        ), 
-        contents=creative_prompt
-    )
-    result = Markdown(response.text).data
-    return result
-    
-def read_memory(memory_path): 
-    with open(memory_path, "r") as f: 
-        old_memory = json.load(f)
-    return old_memory
-
-
-# In[31]:
-
-
-#1. Creating the science Agent
-try: 
-    science_agent = Agent(
-        name="science_agent", 
-        model="gemini-2.0-flash", 
-        description = "Analyze the user's question and gives an explanation using 'science_stateful'. ", 
-        instruction = "You are science_agent. Your job is to give an analytical explanation using 'science_stateful' tool"
-                    "Handle only the explanation part. ", 
-        tools = [science_stateful]
-    )
-
-except Exception as e: 
-    print(f"Could not define creative_agent. Please Check Model and API Key. Error: {e}")
-
-#2. Creating the creative agent
-try: 
-    creative_agent = Agent(
-        name="creative_agent", 
-        model="gemini-2.0-flash", 
-        description="Analyze the user's ", 
-        instruction="", 
-        tools = [creative_stateful]
-    )
-
-except Exception as e: 
-    print(f"Could not define science_agent. Please Check Model and API Key. Error: {e}")
-
-
-# In[32]:
-
-
-class conversational_agent: 
-    def __init__(self, science_agent, creative_agent): 
-        self.creative_agent = creative_agent
-        self.science_agent = science_agent
+        Args:
+            lens (str): The active lens ('scientific' or 'creative').
+            data_path (str): Path to the data file for analysis.
+        """
+        self.lens = lens
+        self.data_path = data_path
+        self.df = None
+        if os.path.exists(self.data_path):
+            self.df = pd.read_csv(self.data_path)
         
-    async def run(self, query, vibe): 
-        #The logic runs here, depends on which vibe is chosen. 
+        print(f"🤖 WiseBot initialized with '{self.lens}' lens.")
 
-        session_service_stateful = InMemorySessionService()
-        USER_ID_STATEFUL = "user_1"
-        APP_NAME_science = "science_agent_v1"
-        APP_NAME_creative = "creative_agent_v1"
-        SESSION_ID_STATEFUL = "session_001"
+    def chat(self, user_message: str) -> dict:
+        """
+        Main chat function. Routes the user's message to the correct
+        internal thinking process based on the lens and message content.
+        """
+        # --- Explicit Tool/Function Calling Logic ---
+        # Check if the user is asking for a graph. This overrides the lens.
+        if any(keyword in user_message.lower() for keyword in ['plot', 'graph', 'chart', 'visualize']):
+            print("📈 Detected plotting request. Routing to graph generator.")
+            return self._generate_plotly_chart(user_message)
 
-        chat_state = {"vibe": None, "messages": [], "last_message": None}
-        memory_path = "../data/chat_state.json"
+        # --- Lens-based Routing ---
+        if self.lens == 'creative':
+            return self._get_creative_response(user_message)
+        else: # Default to scientific
+            return self._get_scientific_response(user_message)
 
-        if vibe == "scientific": 
-            APP_NAME = APP_NAME_science
-            if(os.path.exists(memory_path)):  
-                print(f"🟢Loading previous state..")
-                session_stateful = await session_service_stateful.create_session(
-                    app_name=APP_NAME_science, 
-                    user_id=USER_ID_STATEFUL, 
-                    session_id=SESSION_ID_STATEFUL, 
-                    state=read_memory(memory_path)
-                )
-            
-            else: 
-                session_stateful = await session_service_stateful.create_session(
-                    app_name=APP_NAME_science, 
-                    user_id=USER_ID_STATEFUL, 
-                    session_id=SESSION_ID_STATEFUL, 
-                    state=chat_state
-                )
-            retrieved_session = await session_service_stateful.get_session(app_name=APP_NAME_science, 
-                                                                   user_id = USER_ID_STATEFUL, 
-                                                                   session_id = SESSION_ID_STATEFUL)
-                    
-            runner = Runner(
-                agent = self.science_agent, 
-                app_name = APP_NAME_science, 
-                session_service = session_service_stateful
-            )
-            print(f"Runner created for agent '{runner.agent.name}'. ")
+    def _get_scientific_response(self, user_message: str) -> dict:
+        """Generates a factual, analytical response."""
+        print("🔬 Generating scientific response...")
+        prompt = f"""You are a scientific assistant. Your goal is to explain the user's question in a way that is analytical, fact-based, and clear.
+        Question: {user_message}"""
+        
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        return {"type": "text", "content": response.text.strip()}
 
-        elif vibe == "creative": 
-            APP_NAME = APP_NAME_creative
-            if(os.path.exists(memory_path)):  
-                print(f"🟢Loading previous state..")
-                session_stateful = await session_service_stateful.create_session(
-                    app_name=APP_NAME_creative, 
-                    user_id=USER_ID_STATEFUL, 
-                    session_id=SESSION_ID_STATEFUL, 
-                    state=read_memory(memory_path)
-                )
-            else: 
-                session_stateful = await session_service_stateful.create_session(
-                    app_name=APP_NAME_creative, 
-                    user_id=USER_ID_STATEFUL, 
-                    session_id=SESSION_ID_STATEFUL, 
-                    state=chat_state
-                )
-                
-            retrieved_session = await session_service_stateful.get_session(app_name=APP_NAME_creative, 
-                                                                   user_id = USER_ID_STATEFUL, 
-                                                                   session_id = SESSION_ID_STATEFUL)
-            runner = Runner(
-                agent = self.creative_agent, 
-                app_name = APP_NAME_creative, 
-                session_service = session_service_stateful
-            )
-            print(f"Runner created for agent '{runner.agent.name}'. ")
-        stored_session = session_service_stateful.sessions[APP_NAME][USER_ID_STATEFUL][SESSION_ID_STATEFUL]
-        stored_session.state["messages"].append(query)
-        stored_session.state["last_message"] = query
-        response = await call_agent_async(query=query, 
-                        runner=runner, 
-                        user_id = USER_ID_STATEFUL, 
-                        session_id=SESSION_ID_STATEFUL)
-        return response
-#Dummy test to see whether it runs
+    def _get_creative_response(self, user_message: str) -> dict:
+        """Generates an imaginative, metaphorical response."""
+        print("🎨 Generating creative response...")
+        prompt = f"""You are a creative muse. Your task is to answer the user's prompt in a way that is artistic, poetic, or metaphorical.
+        Prompt: {user_message}"""
 
-def run_conversation(query: str, vibe: str): 
-    agent = conversational_agent(science_agent, creative_agent)
-    file_path = "../data/chat_state.json"
-    with open(file_path, "r") as f:
-        data = json.load(f)
-    data['vibe'] = vibe
-    data["messages"].append(query)     # Append to a list
-    data["last_message"] = query
-    with open(file_path, "w") as f:
-        json.dump(data, f, indent=2) 
-    agent_response = asyncio.run(agent.run(query, vibe))
-    return agent_response
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        return {"type": "text", "content": response.text.strip()}
 
-#Dummy test
-#just enter the query and vibe
+    def _generate_plotly_chart(self, user_message: str) -> dict:
+        """Uses Gemini to write and execute Python code to generate a Plotly chart."""
+        print("📊 Generating Plotly chart code...")
+        if self.df is None:
+            return {"type": "error", "content": "I can't generate a chart because the data file was not found."}
+
+        # Let Gemini write the plotting code for us
+        prompt = f"""You are a data visualization expert. You write Python code using the pandas and plotly.express libraries.
+        A user wants to create a plot from a pandas DataFrame named 'df'. The DataFrame has the following columns: {list(self.df.columns)}.
+        The user's request is: '{user_message}'
+
+        Your task is to write Python code to generate a Plotly figure object named 'fig'.
+        - Use the provided DataFrame 'df'.
+        - The final line of your code MUST be `fig = ...`
+        - Do NOT include any explanations or markdown, only the raw Python code.
+
+        Example Request: "Plot the closing price over time."
+        Example Code Output:
+        import plotly.express as px
+        fig = px.line(df, x='Date', y='Close', title='WMT Closing Price Over Time')
+
+        Now, write the Python code for the user's request.
+        """
+        
+        model = genai.GenerativeModel('gemini-1.5-pro') # Use Pro for better code generation
+        code_response = model.generate_content(prompt)
+        
+        generated_code = code_response.text.strip().replace("```python", "").replace("```", "")
+        print(f"Generated Code:\n---\n{generated_code}\n---")
+
+        try:
+            # IMPORTANT: exec() is powerful but risky in production. Perfect for a hackathon.
+            # We create a local scope to execute the code in.
+            local_scope = {'df': self.df, 'px': px}
+            exec(generated_code, globals(), local_scope)
+            fig = local_scope.get('fig')
+
+            if fig:
+                # Convert the figure to JSON so the frontend can render it
+                chart_json = fig.to_json()
+                return {"type": "plotly", "content": chart_json}
+            else:
+                return {"type": "error", "content": "I couldn't generate a chart from your request. Could you try rephrasing it?"}
+
+        except Exception as e:
+            print(f"🚨 Error executing generated code: {e}")
+            return {"type": "error", "content": f"I ran into an error trying to create that chart: {e}"}
+
+
+# --- A simple test block so you can run this file directly to test it ---
 if __name__ == "__main__":
-    print(run_conversation("What do u think of first world country?", "scientific"))
+    print("\n--- Testing WiseBot ---")
+    
+    # Test 1: Scientific Lens
+    bot_sci = WiseBot(lens='scientific')
+    response_sci = bot_sci.chat("Explain the concept of 'market capitalization'.")
+    print("\n[Scientific Response]:", response_sci['type'], "\n", response_sci['content'][:100] + "...")
+    
+    # Test 2: Creative Lens
+    bot_creative = WiseBot(lens='creative')
+    response_creative = bot_creative.chat("What is the stock market?")
+    print("\n[Creative Response]:", response_creative['type'], "\n", response_creative['content'][:100] + "...")
+
+    # Test 3: Plotly Chart Generation
+    bot_plot = WiseBot(lens='scientific') # Lens doesn't matter for plotting
+    response_plot = bot_plot.chat("Can you plot the trading volume for WMT over the years?")
+    print("\n[Plotly Response]:", response_plot['type'])
+    # print(response_plot['content']) # This will be a long JSON string
+    assert response_plot['type'] == 'plotly' # Auto-check if it worked
+    print("--- Test Complete ---")

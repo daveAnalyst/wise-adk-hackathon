@@ -1,29 +1,17 @@
 # ==============================================================================
-# --- New main.py (Copy and Paste This Entire Block) ---
+# --- THE DEFINITIVE, READY-TO-SHIP main.py (v1.3) ---
 # ==============================================================================
-
-#import streamlit as st
-#import time
-#import plotly.io as pio
-#from dotenv import load_dotenv
-
-# --- NEW: REAL AGENT IMPORTS ---
-#from agents.VibeDetector import detect_vibe
-#from agents.SparkGenerator import get_spark
-#from agents.WiseBot import WiseBot
-
-# In main.py
 import streamlit as st
 import time
 import plotly.io as pio
 from dotenv import load_dotenv
-import os # <-- Add os import
-import google.generativeai as genai # <-- Add genai import
+import os
+import google.generativeai as genai
 
-# --- NEW: REAL AGENT IMPORTS ---
-from agents.VibeDetector import detect_vibe
-from agents.SparkGenerator import get_spark
-from agents.WiseBot import WiseBot
+# --- AGENT IMPORTS (RENAMED) ---
+from agents.VibeDetectionAgent import detect_vibe
+from agents.DaydreamAgent import get_daydream_spark
+from agents.ConversationalAgent import ConversationalAgent
 
 # --- CENTRALIZED API KEY CONFIGURATION ---
 load_dotenv()
@@ -31,20 +19,29 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 if not GOOGLE_API_KEY:
     st.error("FATAL ERROR: GOOGLE_API_KEY not found in .env file!")
-    st.stop() # This will halt the app if the key is missing
+    st.stop()
 
 genai.configure(api_key=GOOGLE_API_KEY)
-print("✅ Gemini AI Model Initialized Successfully from main.py.")
-# ----------------------------------------
 
-# --- NEW: LOAD API KEYS ---
-# Make sure you have a .env file in this directory with your GOOGLE_API_KEY
-#load_dotenv()
+# --- HELPER FUNCTION FOR SMART, ON-DEMAND SPARKS ---
+def get_contextual_spark(vibe: str, history: list):
+    print(f"✨ Generating a new contextual spark with vibe: {vibe}...")
+    conversation_context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in history[-4:]])
+    if vibe == "scientific":
+        vibe_instruction = "Your response must be analytical, data-focused, or scientific. Ask a clarifying question or propose a logical next step."
+    else: # 'creative'
+        vibe_instruction = "Your response must be imaginative, metaphorical, or creative. Ask a 'what if' question or propose a lateral thinking idea."
+    
+    prompt = f"""You are an AI assistant. A user is in the middle of a conversation. Your task is to generate a single, thought-provoking question or 'what if' statement that is relevant to the ongoing conversation, in a specific tone.
+    CURRENT CONVERSATION CONTEXT:\n---\n{conversation_context}\n---\n
+    INSTRUCTIONS:\n- {vibe_instruction}\n- Your response must be related to the conversation context.\n- Do NOT act like you are interrupting. Just provide the question/statement directly.\n- Be concise.
+    """
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    response = model.generate_content(prompt)
+    return response.text.strip()
 
-# --- SINGLE, UNIFIED PAGE CONFIGURATION ---
+# --- PAGE CONFIG & PERSONA SETUP ---
 st.set_page_config(page_title="Wise", page_icon="🦉", layout="wide")
-
-# --- PERSONA CONFIGURATION ---
 PERSONA_CONFIG = {
     "scientific": {"label": "Analytical 🔬", "color": "#2196F3", "avatar": "🔬", "prompt": "Analytical Vibe engaged. Ready for facts and analysis."},
     "creative": {"label": "Imaginative 🎨", "color": "#FFC107", "avatar": "🎨", "prompt": "Imaginative Vibe engaged. Ready to brainstorm and explore ideas!"}
@@ -54,63 +51,75 @@ PERSONA_CONFIG = {
 if "stage" not in st.session_state:
     st.session_state.stage = "onboarding"
     st.session_state.messages = []
-    st.session_state.current_vibe = "scientific" # Default to scientific
+    st.session_state.current_vibe = "scientific"
     st.session_state.user_profile = {"name": "Dave", "status": "new_user"}
+    st.session_state.dream_inbox = []
+    st.session_state.conversational_agent = ConversationalAgent(data_path="data/wmt_stock_data.csv")
 
-# --- NEW: REAL AGENT INITIALIZATION ---
-if "wise_bot" not in st.session_state:
-    # IMPORTANT: Verify this path is correct from your root directory
-    st.session_state.wise_bot = WiseBot(data_path="data/wmt_stock_data.csv")
-
-# --- CUSTOM CSS ---
+# --- CUSTOM CSS FOR POLISHED LOOK ---
 st.markdown("""
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600&display=swap');
-        html, body, [class*="css"]  { font-family: 'Lexend', sans-serif; }
-        div[data-testid="stChatMessage"] { background-color: #262730; border-radius: 20px; padding: 16px; border: 1px solid #404040; }
-        div[data-testid="stButton"] > button { border-radius: 20px; border: 1px solid #FFC107; background-color: transparent; padding: 10px 20px; transition: background-color 0.3s, color 0.3s; }
-        div[data-testid="stButton"] > button:hover { background-color: #FFC107; color: black; }
-        div[data-testid="stButton"] > button:disabled { border: 1px solid #4a4a4a; background-color: #222222; color: #4a4a4a; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+        .stApp { background-color: #0E1117; }
+        
+        /* Default for all chat bubbles (user's bubbles) */
+        div[data-testid="stChatMessage"] { 
+            background-color: #262730; 
+            border-radius: 12px; 
+            border: 1px solid #303138; 
+        }
+
+        /* --- FINAL FIX: Overrides for the AI's bubbles --- */
+        div[data-testid="stChatMessage"]:has(span[title="assistant"]) {
+            background-color: #1C2333; /* A distinct, dark blue-grey background */
+        }
+        div[data-testid="stChatMessage"]:has(span[title="assistant"]) p { 
+            color: #FFFFFF; /* Pure white text for maximum contrast */
+        }
+        
+        /* General UI Polish */
+        div[data-testid="stButton"] > button { border-radius: 8px; border: 1px solid #4A4A5A; }
+        div[data-testid="stButton"] > button:hover { border: 1px solid #FFC107; color: #FFC107; background-color: #262730; }
+        .stTextInput input { border-radius: 8px; }
+        .st-emotion-cache-1629p8f, .st-emotion-cache-p5msec { border-radius: 12px; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- FUNCTION TO CREATE A CENTERED LAYOUT ---
 def centered_container():
     col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        return st.container()
+    with col2: return st.container()
 
 # ==============================================================================
-# --- STAGE ROUTER: The App's Main Brain ---
+# --- STAGE ROUTER ---
 # ==============================================================================
 
 if st.session_state.stage in ["onboarding", "welcome", "set_vibe"]:
     with centered_container():
-        # Ensure your logo file is named 'wise_logo.png.jpeg' and is in the root folder
         st.image("wise_logo.png.jpeg", width=150)
 
         if st.session_state.stage == "onboarding":
             st.title("Hello! I'm Wise.")
-            st.header("What topics are you curious about?")
-            if interests := st.text_input("e.g., AI, philosophy, space...", key="onboarding_input"):
-                with st.spinner("Calibrating my curiosity engine..."):
-                    time.sleep(1.5)
-                    st.session_state.user_profile["status"] = "existing_user"
-                    st.session_state.stage = "welcome"
-                    st.rerun()
+            st.header("Your Curious AI Partner.")
+            if st.button("Let's Begin", use_container_width=True):
+                st.session_state.stage = "welcome"
+                st.rerun()
 
         elif st.session_state.stage == "welcome":
             st.header(f"Welcome back, {st.session_state.user_profile['name']}.")
-            # --- REPLACED LOGIC: REAL SPARK GENERATION ---
-            with st.spinner("Finding a new spark of inspiration..."):
-                spark_idea = get_spark(data_path="data/wmt_stock_data.csv")
-            st.info(f"💡 **A thought I had:** {spark_idea}")
+            if 'current_spark' not in st.session_state:
+                with st.spinner("Finding a new spark of inspiration..."):
+                    spark_idea = get_daydream_spark(data_path="data/wmt_stock_data.csv")
+                    st.session_state.current_spark = spark_idea
+                    if spark_idea not in st.session_state.dream_inbox:
+                        st.session_state.dream_inbox.append(spark_idea)
+            st.info(f"💡 {st.session_state.current_spark}")
+            
             btn_col1, btn_col2 = st.columns(2)
             if btn_col1.button("Explore this Idea", use_container_width=True):
                 st.session_state.current_vibe = "creative"
-                st.session_state.messages = [{"role": "user", "content": "Let's explore that idea you had."}]
+                st.session_state.messages = [{"role": "user", "content": f"Let's explore this idea: {st.session_state.current_spark}"}]
                 st.session_state.stage = "chat"
-                st.toast("Switched to Creative Vibe!", icon="🎨")
                 st.rerun()
             if btn_col2.button("Start a New Topic", use_container_width=True):
                 st.session_state.stage = "set_vibe"
@@ -120,83 +129,80 @@ if st.session_state.stage in ["onboarding", "welcome", "set_vibe"]:
             st.header("Of course. What's on your mind?")
             if vibe_prompt := st.text_input("Type your first message here...", key="vibe_input"):
                 with st.spinner("Tuning into the vibe..."):
-                    # --- REPLACED LOGIC: REAL VIBE DETECTION ---
                     detected_vibe = detect_vibe(vibe_prompt)
-                    if detected_vibe == 'none': # Handle simple greetings
-                        detected_vibe = 'scientific' # Default to a safe vibe
+                    if detected_vibe == 'none': detected_vibe = 'scientific'
                     st.session_state.current_vibe = detected_vibe
                     st.session_state.messages = [{"role": "user", "content": vibe_prompt}]
                     st.session_state.stage = "chat"
-                    st.toast(f"Switched to {detected_vibe.capitalize()} Vibe!", icon=PERSONA_CONFIG[detected_vibe]['avatar'])
                     st.rerun()
 
 elif st.session_state.stage == "chat":
     current_persona = PERSONA_CONFIG[st.session_state.current_vibe]
-
-    # --- SIDEBAR ---
     with st.sidebar:
         st.image("wise_logo.png.jpeg", width=80)
         if st.button("➕ New Conversation", use_container_width=True):
-            st.session_state.stage = "welcome"
-            st.session_state.messages = []
-            st.rerun()
-        st.header("Change Vibe")
+            if 'current_spark' in st.session_state: del st.session_state.current_spark
+            st.session_state.stage = "welcome"; st.session_state.messages = []; st.rerun()
+        st.header("Cognitive Lens")
         for vibe_key, vibe_info in PERSONA_CONFIG.items():
             if st.button(vibe_info["label"], key=vibe_key, use_container_width=True):
                 if st.session_state.current_vibe != vibe_key:
                     st.session_state.current_vibe = vibe_key
                     st.session_state.messages.append({"role": "assistant", "content": vibe_info["prompt"], "avatar": vibe_info["avatar"]})
-                    st.toast(f"Switched to {vibe_info['label']} Vibe!", icon=vibe_info['avatar'])
                     st.rerun()
+        st.divider()
+        st.header("On-Demand Spark")
+        if st.button("💡 Generate a new idea", use_container_width=True):
+            with st.spinner("Finding a relevant spark..."):
+                spark_reply = get_contextual_spark(vibe=st.session_state.current_vibe, history=st.session_state.messages)
+                st.session_state.messages.append({"role": "assistant", "content": spark_reply, "avatar": "💡"})
+                if spark_reply not in st.session_state.dream_inbox:
+                    st.session_state.dream_inbox.append(spark_reply)
+                st.rerun()
+        st.divider()
+        st.header("Dream Inbox")
+        if not st.session_state.dream_inbox:
+            st.caption("Your generated sparks will appear here.")
+        else:
+            for spark in reversed(st.session_state.dream_inbox):
+                st.info(spark, icon="💡")
 
-    # --- HEADER & CHAT ---
-    main_col1, main_col2, main_col3 = st.columns([1, 3, 1])
+    main_col1, main_col2, main_col3 = st.columns([1, 4, 1])
     with main_col2:
         st.markdown(f"### Current Vibe: <span style='color: {current_persona['color']};'>{current_persona['label']}</span>", unsafe_allow_html=True)
         st.divider()
-
-        # Display chat history
+        
         for message in st.session_state.messages:
             avatar = current_persona.get('avatar') if message["role"] == "assistant" else "🧑‍💻"
-            if "avatar" in message:
-                avatar = message["avatar"]
+            if "avatar" in message: avatar = message["avatar"]
             with st.chat_message(message["role"], avatar=avatar):
-                # This is a bit of a hack to re-render plotly charts from history
-                if "{" in message["content"] and '"type": "plotly"' in message["content"]:
-                     try:
-                        chart_data = json.loads(message["content"])
-                        fig = pio.from_json(chart_data["content"])
-                        st.plotly_chart(fig, use_container_width=True)
-                     except:
-                        st.markdown("Could not render chart from history.")
-                else:
-                    st.markdown(message["content"])
+                st.markdown(message["content"])
 
-        # --- REPLACED LOGIC: REAL CHAT INPUT AND RESPONSE ---
         if prompt := st.chat_input("Continue the conversation..."):
             st.session_state.messages.append({"role": "user", "content": prompt})
             st.rerun()
 
     if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
-        user_message = st.session_state.messages[-1]["content"]
-        with main_col2:
-            with st.chat_message("assistant", avatar=current_persona["avatar"]):
-                with st.spinner(f"Wise is thinking with a '{st.session_state.current_vibe}' lense..."):
-                    st.session_state.wise_bot.lens = st.session_state.current_vibe
-                    response = st.session_state.wise_bot.chat(user_message)
-                    
-                    ai_content_for_history = ""
-                    if response["type"] == "plotly":
-                        fig = pio.from_json(response["content"])
-                        st.plotly_chart(fig, use_container_width=True)
-                        # We store the JSON in history to attempt re-rendering
-                        ai_content_for_history = f'{{"type": "plotly", "content": {response["content"]}}}'
-                    elif response["type"] == "error":
-                        st.error(response["content"])
-                        ai_content_for_history = response["content"]
-                    else: # 'text'
-                        st.markdown(response["content"])
-                        ai_content_for_history = response["content"]
-                    
-                    st.session_state.messages.append({"role": "assistant", "content": ai_content_for_history, "avatar": current_persona["avatar"]})
-            st.rerun()
+        last_message = st.session_state.messages[-1]["content"]
+        
+        detected_vibe_in_chat = detect_vibe(last_message)
+        if detected_vibe_in_chat != 'none' and detected_vibe_in_chat != st.session_state.current_vibe:
+            other_vibe_label = PERSONA_CONFIG[detected_vibe_in_chat]['label']
+            st.toast(f"Your message seems {detected_vibe_in_chat}. Consider switching to the {other_vibe_label} lens!", icon="🤔")
+
+        with main_col2.chat_message("assistant", avatar=current_persona["avatar"]):
+            with st.spinner("Wise is thinking..."):
+                agent = st.session_state.conversational_agent
+                agent.lens = st.session_state.current_vibe
+                response = agent.chat(last_message)
+                
+                if response["type"] == "plotly":
+                    fig = pio.from_json(response["content"])
+                    st.plotly_chart(fig, use_container_width=True)
+                    ai_content_for_history = "As requested, here is the chart:"
+                else:
+                    st.markdown(response["content"])
+                    ai_content_for_history = response["content"]
+                
+                st.session_state.messages.append({"role": "assistant", "content": ai_content_for_history, "avatar": current_persona["avatar"]})
+        st.rerun()
