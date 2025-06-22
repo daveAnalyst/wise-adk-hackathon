@@ -16,9 +16,9 @@ RUN pip install --no-cache-dir --trusted-host pypi.python.org -r requirements.tx
 COPY . .
 
 # Expose the port that Streamlit runs on to the outside world
-EXPOSE 8501
+EXPOSE 8080
 
 # Define the command to run your app when the container starts.
 # We use the robust python -m streamlit run command.
 # --server.headless=true is best practice for cloud deployments.
-CMD ["python", "-m", "streamlit", "run", "main.py", "--server.port=8501", "--server.headless=true"]
+CMD ["streamlit", "run", "main.py", "--server.port=8080", "--server.address=0.0.0.0"]
