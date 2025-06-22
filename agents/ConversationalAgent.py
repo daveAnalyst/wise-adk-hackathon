@@ -1,140 +1,81 @@
 import os
 import pandas as pd
 import google.generativeai as genai
-from google.generativeai import types
 import plotly.express as px
 
-# --- Configuration ---
-if 'GOOGLE_API_KEY' in os.environ:
-    genai.configure(api_key=os.environ['GOOGLE_API_KEY'])
-else:
-    print("WARNING: GOOGLE_API_KEY environment variable not set.")
-
 class ConversationalAgent:
-    """
-    The main Conversational Agent for Wise. It thinks with the user,
-    adapting its responses based on the selected 'Cognitive Lens'.
-    """
-    def __init__(self, lens: str = 'scientific', data_path: str = "../data/data/WMT_1970-10-01_2025-01-31.csv"):
-        """
-        Initializes the agent with a specific cognitive lens.
-
-        Args:
-            lens (str): The active lens ('scientific' or 'creative').
-            data_path (str): Path to the data file for analysis.
-        """
+    def __init__(self, lens: str = 'scientific', data_path: str = "data/wmt_stock_data.csv"):
         self.lens = lens
         self.data_path = data_path
         self.df = None
         if os.path.exists(self.data_path):
             self.df = pd.read_csv(self.data_path)
-        
-        print(f"🤖 WiseBot initialized with '{self.lens}' lens.")
+        print(f"🤖 ConversationalAgent initialized with '{self.lens}' lens.")
 
-    def chat(self, user_message: str) -> dict:
-        """
-        Main chat function. Routes the user's message to the correct
-        internal thinking process based on the lens and message content.
-        """
-        # --- Explicit Tool/Function Calling Logic ---
-        # Check if the user is asking for a graph. This overrides the lens.
+    def chat(self, user_message: str, history: list) -> dict:
         if any(keyword in user_message.lower() for keyword in ['plot', 'graph', 'chart', 'visualize']):
             print("📈 Detected plotting request. Routing to graph generator.")
             return self._generate_plotly_chart(user_message)
-
-        # --- Lens-based Routing ---
         if self.lens == 'creative':
-            return self._get_creative_response(user_message)
-        else: # Default to scientific
-            return self._get_scientific_response(user_message)
+            return self._get_creative_response(user_message, history)
+        else:
+            return self._get_scientific_response(user_message, history)
 
-    def _get_scientific_response(self, user_message: str) -> dict:
-        """Generates a factual, analytical response."""
-        print("🔬 Generating scientific response...")
-        prompt = f"""You are a scientific assistant. Your goal is to explain the user's question in a way that is analytical, fact-based, and clear.
-        Question: {user_message}"""
-        
+    def _format_history_for_prompt(self, history: list) -> str:
+        if not history: return "This is the beginning of the conversation."
+        formatted_history = ""
+        for msg in history:
+            role = "User" if msg["role"] == "user" else "AI"
+            content = msg.get("content", "")
+            if not content.startswith('{"type": "plotly"'):
+                formatted_history += f"{role}: {content}\n"
+        return formatted_history
+
+    def _get_scientific_response(self, user_message: str, history: list) -> dict:
+        print("🔬 Generating scientific response with context...")
+        conversation_history = self._format_history_for_prompt(history)
+        prompt = f"""You are a brilliant, context-aware AI assistant.
+        CONVERSATION HISTORY:\n---\n{conversation_history}\n---\n
+        Based on the complete history, provide a clear, factual, and analytical response to the LATEST user message.
+        User: {user_message}\nAI:"""
         model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(prompt)
         return {"type": "text", "content": response.text.strip()}
 
-    def _get_creative_response(self, user_message: str) -> dict:
-        """Generates an imaginative, metaphorical response."""
-        print("🎨 Generating creative response...")
-        prompt = f"""You are a creative muse. Your task is to answer the user's prompt in a way that is artistic, poetic, or metaphorical.
-        Prompt: {user_message}"""
-
+    def _get_creative_response(self, user_message: str, history: list) -> dict:
+        print("🎨 Generating creative response with context...")
+        conversation_history = self._format_history_for_prompt(history)
+        prompt = f"""You are a clever, context-aware AI muse.
+        CONVERSATION HISTORY:\n---\n{conversation_history}\n---\n
+        Based on the complete history, provide an artistic, poetic, or metaphorical response to the LATEST user message.
+        User: {user_message}\nAI:"""
         model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(prompt)
         return {"type": "text", "content": response.text.strip()}
 
     def _generate_plotly_chart(self, user_message: str) -> dict:
-        """Uses Gemini to write and execute Python code to generate a Plotly chart."""
         print("📊 Generating Plotly chart code...")
-        if self.df is None:
-            return {"type": "error", "content": "I can't generate a chart because the data file was not found."}
-
-        # Let Gemini write the plotting code for us
-        prompt = f"""You are a data visualization expert. You write Python code using the pandas and plotly.express libraries.
-        A user wants to create a plot from a pandas DataFrame named 'df'. The DataFrame has the following columns: {list(self.df.columns)}.
+        if self.df is None: return {"type": "error", "content": "Data file not found."}
+        prompt = f"""You are a Python data visualization expert specializing in Plotly Express. Your ONLY task is to write a single line of Python code that generates a Plotly figure object and assigns it to a variable named 'fig'. You will be working with a pre-existing pandas DataFrame named `df`. DO NOT create your own DataFrame. The `df` is already loaded.
+        The `df` DataFrame has the following columns: {list(self.df.columns)}.
         The user's request is: '{user_message}'
-
-        Your task is to write Python code to generate a Plotly figure object named 'fig'.
-        - Use the provided DataFrame 'df'.
-        - The final line of your code MUST be `fig = ...`
-        - Do NOT include any explanations or markdown, only the raw Python code.
-
+        RULES:
+        1. Assume `import plotly.express as px` and `import pandas as pd` are already done.
+        2. Your output MUST be a single line of code starting with `fig = px...`.
+        3. If the 'Date' column is used, it is a string. Convert it to datetime within your single line of code using `pd.to_datetime(df['Date'])`.
+        4. DO NOT output the word "python", markdown backticks ```, or any explanations.
         Example Request: "Plot the closing price over time."
-        Example Code Output:
-        import plotly.express as px
-        fig = px.line(df, x='Date', y='Close', title='WMT Closing Price Over Time')
-
-        Now, write the Python code for the user's request.
-        """
-        
-        model = genai.GenerativeModel('gemini-1.5-pro') # Use Pro for better code generation
+        Example Output: fig = px.line(df, x=pd.to_datetime(df['Date']), y='Close', title='WMT Closing Price Over Time')"""
+        model = genai.GenerativeModel('gemini-1.5-pro')
         code_response = model.generate_content(prompt)
-        
-        generated_code = code_response.text.strip().replace("```python", "").replace("```", "")
+        generated_code = code_response.text.strip()
         print(f"Generated Code:\n---\n{generated_code}\n---")
-
         try:
-            # IMPORTANT: exec() is powerful but risky in production. Perfect for a hackathon.
-            # We create a local scope to execute the code in.
-            local_scope = {'df': self.df, 'px': px}
+            local_scope = {'df': self.df, 'px': px, 'pd': pd}
             exec(generated_code, globals(), local_scope)
             fig = local_scope.get('fig')
-
-            if fig:
-                # Convert the figure to JSON so the frontend can render it
-                chart_json = fig.to_json()
-                return {"type": "plotly", "content": chart_json}
-            else:
-                return {"type": "error", "content": "I couldn't generate a chart from your request. Could you try rephrasing it?"}
-
+            if fig: return {"type": "plotly", "content": fig.to_json()}
+            else: return {"type": "error", "content": "Could not generate a chart. Please rephrase."}
         except Exception as e:
             print(f"🚨 Error executing generated code: {e}")
-            return {"type": "error", "content": f"I ran into an error trying to create that chart: {e}"}
-
-
-# --- A simple test block so you can run this file directly to test it ---
-if __name__ == "__main__":
-    print("\n--- Testing WiseBot ---")
-    
-    # Test 1: Scientific Lens
-    bot_sci = WiseBot(lens='scientific')
-    response_sci = bot_sci.chat("Explain the concept of 'market capitalization'.")
-    print("\n[Scientific Response]:", response_sci['type'], "\n", response_sci['content'][:100] + "...")
-    
-    # Test 2: Creative Lens
-    bot_creative = WiseBot(lens='creative')
-    response_creative = bot_creative.chat("What is the stock market?")
-    print("\n[Creative Response]:", response_creative['type'], "\n", response_creative['content'][:100] + "...")
-
-    # Test 3: Plotly Chart Generation
-    bot_plot = WiseBot(lens='scientific') # Lens doesn't matter for plotting
-    response_plot = bot_plot.chat("Can you plot the trading volume for WMT over the years?")
-    print("\n[Plotly Response]:", response_plot['type'])
-    # print(response_plot['content']) # This will be a long JSON string
-    assert response_plot['type'] == 'plotly' # Auto-check if it worked
-    print("--- Test Complete ---")
+            return {"type": "error", "content": f"I ran into an error: {e}"}
