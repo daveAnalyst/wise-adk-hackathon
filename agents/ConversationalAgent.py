@@ -1,16 +1,32 @@
+# agents/ConversationalAgent.py (FINAL, PATH-AWARE VERSION)
+
 import os
 import pandas as pd
 import google.generativeai as genai
 import plotly.express as px
 
+# --- NEW: Robust Path Calculation ---
+_PROJ_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_DEFAULT_DATA_PATH = os.path.join(_PROJ_ROOT, 'data', 'wmt_stock_data.csv')
+# ------------------------------------
+
 class ConversationalAgent:
-    def __init__(self, lens: str = 'scientific', data_path: str = "data/wmt_stock_data.csv"):
+    def __init__(self, lens: str = 'scientific', data_path: str = _DEFAULT_DATA_PATH):
+        """
+        Initializes the agent with a specific cognitive lens.
+        """
         self.lens = lens
         self.data_path = data_path
         self.df = None
+        # Check if the calculated absolute path exists
         if os.path.exists(self.data_path):
             self.df = pd.read_csv(self.data_path)
-        print(f"🤖 ConversationalAgent initialized with '{self.lens}' lens.")
+            print(f"🤖 ConversationalAgent initialized with '{self.lens}' lens and data loaded successfully.")
+        else:
+            print(f"🚨 ConversationalAgent initialized, but data file not found at: {self.data_path}")
+    
+    # --- The rest of the file is identical to what you sent, which is great! ---
+    # It already has the context memory and the robust graph prompt.
 
     def chat(self, user_message: str, history: list) -> dict:
         if any(keyword in user_message.lower() for keyword in ['plot', 'graph', 'chart', 'visualize']):
@@ -55,7 +71,7 @@ class ConversationalAgent:
 
     def _generate_plotly_chart(self, user_message: str) -> dict:
         print("📊 Generating Plotly chart code...")
-        if self.df is None: return {"type": "error", "content": "Data file not found."}
+        if self.df is None: return {"type": "error", "content": "Data file not found. I cannot generate a graph without data."}
         prompt = f"""You are a Python data visualization expert specializing in Plotly Express. Your ONLY task is to write a single line of Python code that generates a Plotly figure object and assigns it to a variable named 'fig'. You will be working with a pre-existing pandas DataFrame named `df`. DO NOT create your own DataFrame. The `df` is already loaded.
         The `df` DataFrame has the following columns: {list(self.df.columns)}.
         The user's request is: '{user_message}'
